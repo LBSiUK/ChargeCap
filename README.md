@@ -8,12 +8,12 @@ That jailbreak has no Mobile Substrate, so this is a daemon and an app, not an i
 
 ## Installing
 
-A Cydia repo is planned. Until it exists, download the `.deb` from
-[Releases](https://github.com/LBSiUK/ChargeCap/releases), copy it to the device, and run this as root:
+Add Leon's repo in Cydia: go to Sources, tap Edit, then Add, and enter `https://repo.lbsi.uk/`.
+Or open [repo.lbsi.uk](https://repo.lbsi.uk/) in Safari on the device and tap Add to Cydia.
+Then install ChargeCap from the repo.
 
-```
-dpkg -i uk.lbsi.chargecap_1.0.0_iphoneos-arm.deb
-```
+Without Cydia, download the `.deb` from [Releases](https://github.com/LBSiUK/ChargeCap/releases),
+copy it to the device, and run `dpkg -i uk.lbsi.chargecap_1.0.0_iphoneos-arm.deb` as root.
 
 The daemon starts straight away, and the ChargeCap app appears on the home screen.
 

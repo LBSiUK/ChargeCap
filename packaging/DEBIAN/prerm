@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stopping the daemon releases its hold on the charger, so the iPad charges normally again.
+launchctl unload /Library/LaunchDaemons/uk.lbsi.chargecap.plist 2>/dev/null
+/usr/bin/chargecap release-charger 2>/dev/null
+exit 0

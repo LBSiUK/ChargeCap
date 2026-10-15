@@ -1,0 +1,13 @@
+Package: uk.lbsi.chargecap
+Name: ChargeCap
+Version: @VERSION@
+Architecture: iphoneos-arm
+Description: Stops charging at a percentage you choose.
+ Holds the battery below full to slow its wear. Charging pauses at the
+ limit (80% by default) and starts again once the battery falls to the
+ resume level (75%). Set it in the ChargeCap app or with `chargecap`
+ over SSH.
+Maintainer: LBSiUK
+Author: LBSiUK
+Section: Utilities
+Depends: firmware (>= 9.0), uikittools

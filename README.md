@@ -4,6 +4,8 @@ Stops a jailbroken iOS 9 iPad charging past a percentage you choose, to slow bat
 Built for, and tested on, an iPad mini 1 (iPad2,5) on iOS 9.3.5 with the iocaste jailbreak.
 That jailbreak has no Mobile Substrate, so this is a daemon and an app, not an injected tweak.
 
+Tested and working that this survives reboots. I've only tested this on an iPad mini 1st Gen for the moment so it would be massively appreciated if others are willing to test this on other devices running iOS 9.
+
 ![The ChargeCap app on an iPad mini, charging paused at the limit](docs/screenshot.png)
 
 ## Installing

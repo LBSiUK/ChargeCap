@@ -5,12 +5,15 @@
 static CFStringRef kEnabled = CFSTR("Enabled");
 static CFStringRef kLimit = CFSTR("Limit");
 static CFStringRef kResume = CFSTR("Resume");
+static CFStringRef kResumeOff = CFSTR("ResumeScreenOff");
 
 void cc_prefs_clamp(cc_prefs *p) {
     if (p->limit < CC_MIN_LIMIT) p->limit = CC_MIN_LIMIT;
     if (p->limit > 100) p->limit = 100;
     if (p->resume > p->limit - 1) p->resume = p->limit - 1;
     if (p->resume < CC_MIN_RESUME) p->resume = CC_MIN_RESUME;
+    if (p->resume_off > p->resume) p->resume_off = p->resume;
+    if (p->resume_off < CC_MIN_RESUME) p->resume_off = CC_MIN_RESUME;
 }
 
 static int dict_int(CFDictionaryRef d, CFStringRef key, int fallback) {
@@ -24,6 +27,7 @@ void cc_prefs_load(cc_prefs *p) {
     p->enabled = true;
     p->limit = CC_DEFAULT_LIMIT;
     p->resume = CC_DEFAULT_RESUME;
+    p->resume_off = CC_DEFAULT_RESUME;
 
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)CC_PREFS_PATH,
                                                            sizeof CC_PREFS_PATH - 1, false);
@@ -41,6 +45,7 @@ void cc_prefs_load(cc_prefs *p) {
         if (en && CFGetTypeID(en) == CFBooleanGetTypeID()) p->enabled = CFBooleanGetValue(en);
         p->limit = dict_int(plist, kLimit, p->limit);
         p->resume = dict_int(plist, kResume, p->resume);
+        p->resume_off = dict_int(plist, kResumeOff, p->resume); // no setting yet: same as with the screen on
     }
     if (plist) CFRelease(plist);
     cc_prefs_clamp(p);
@@ -53,11 +58,14 @@ bool cc_prefs_save(const cc_prefs *in) {
                                                          &kCFTypeDictionaryValueCallBacks);
     CFNumberRef limit = CFNumberCreate(NULL, kCFNumberIntType, &p.limit);
     CFNumberRef resume = CFNumberCreate(NULL, kCFNumberIntType, &p.resume);
+    CFNumberRef resume_off = CFNumberCreate(NULL, kCFNumberIntType, &p.resume_off);
     CFDictionarySetValue(d, kEnabled, p.enabled ? kCFBooleanTrue : kCFBooleanFalse);
     CFDictionarySetValue(d, kLimit, limit);
     CFDictionarySetValue(d, kResume, resume);
+    CFDictionarySetValue(d, kResumeOff, resume_off);
     CFRelease(limit);
     CFRelease(resume);
+    CFRelease(resume_off);
     CFDataRef data = CFPropertyListCreateData(NULL, d, kCFPropertyListXMLFormat_v1_0, 0, NULL);
     CFRelease(d);
     if (!data) return false;
@@ -99,7 +107,7 @@ static bool reg_bool(io_service_t s, CFStringRef key) {
 }
 
 bool cc_battery_read(cc_battery *b) {
-    *b = (cc_battery){.percent = -1};
+    *b = (cc_battery){.percent = -1, .raw_percent = 100};
 
     CFTypeRef blob = IOPSCopyPowerSourcesInfo();
     CFArrayRef list = blob ? IOPSCopyPowerSourcesList(blob) : NULL;
@@ -118,11 +126,14 @@ bool cc_battery_read(cc_battery *b) {
 
     io_service_t s = charger();
     if (s) {
+        // While inflow is disabled powerd says "Battery Power" with the cable still in.
+        if (reg_bool(s, CFSTR("AppleRawExternalConnected"))) b->external = true;
         b->charging = reg_bool(s, CFSTR("IsCharging"));
         b->milliamps = reg_int(s, CFSTR("InstantAmperage"), 0);
         b->cycles = reg_int(s, CFSTR("CycleCount"), 0);
         b->max_mah = reg_int(s, CFSTR("AppleRawMaxCapacity"), reg_int(s, CFSTR("MaxCapacity"), 0));
         b->design_mah = reg_int(s, CFSTR("DesignCapacity"), 0);
+        if (b->max_mah > 0) b->raw_percent = (reg_int(s, CFSTR("AppleRawCurrentCapacity"), 0) * 100 + b->max_mah / 2) / b->max_mah;
         b->temp_c100 = reg_int(s, CFSTR("Temperature"), 0);
         IOObjectRelease(s);
     }
@@ -130,6 +141,7 @@ bool cc_battery_read(cc_battery *b) {
     CFDictionaryRef status = NULL;
     if (IOPMCopyAssertionsStatus(&status) == KERN_SUCCESS && status) {
         b->inhibited = dict_int(status, CFSTR("ChargeInhibit"), 0) > 0;
+        b->draining = dict_int(status, CFSTR("DisableInflow"), 0) > 0;
         CFRelease(status);
     }
     return b->percent >= 0;

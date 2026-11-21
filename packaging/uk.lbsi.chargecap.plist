@@ -6,7 +6,7 @@
 	<string>uk.lbsi.chargecap</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/libexec/chargecapd</string>
+		<string>@PREFIX@/usr/libexec/chargecapd</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

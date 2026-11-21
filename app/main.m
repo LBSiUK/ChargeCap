@@ -4,9 +4,26 @@
 #include <signal.h>
 #include "../src/chargecap.h"
 
+// The iOS 15 build uses the system's semantic colours, text styles and list cells, so it follows
+// Dark Mode and the reader's text size. The iOS 9 build keeps the colours and fonts of its day.
+#define MODERN (__IPHONE_OS_VERSION_MIN_REQUIRED >= 150000)
+
+#if MODERN
+#define COLOR_TRACK UIColor.tertiarySystemFillColor
+#define COLOR_LEVEL UIColor.systemGreenColor
+#define COLOR_LOW UIColor.systemRedColor
+#define COLOR_TICK UIColor.labelColor
+#define COLOR_SECONDARY UIColor.secondaryLabelColor
+#else
 static UIColor *rgb(int hex) {
     return [UIColor colorWithRed:((hex >> 16) & 255) / 255.0 green:((hex >> 8) & 255) / 255.0 blue:(hex & 255) / 255.0 alpha:1];
 }
+#define COLOR_TRACK rgb(0xDADADF)
+#define COLOR_LEVEL rgb(0x4CD964)
+#define COLOR_LOW rgb(0xFF3B30)
+#define COLOR_TICK rgb(0x1C1C1E)
+#define COLOR_SECONDARY rgb(0x6D6D72)
+#endif
 
 static BOOL daemonRunning(void) {
     FILE *f = fopen(CC_PID_PATH, "r");
@@ -29,16 +46,16 @@ static BOOL daemonRunning(void) {
 - (void)drawRect:(CGRect)rect {
     CGRect track = self.bounds;
     UIBezierPath *shape = [UIBezierPath bezierPathWithRoundedRect:track cornerRadius:track.size.height / 2];
-    [rgb(0xDADADF) setFill];
+    [COLOR_TRACK setFill];
     [shape fill];
     [shape addClip];
     CGRect fill = track;
     fill.size.width = round(track.size.width * MAX(0, MIN(100, self.percent)) / 100.0);
-    [(self.percent <= 20 ? rgb(0xFF3B30) : rgb(0x4CD964)) setFill];
+    [(self.percent <= 20 ? COLOR_LOW : COLOR_LEVEL) setFill];
     UIRectFill(fill);
     if (self.showLimit) {
         CGFloat x = round(track.size.width * self.limit / 100.0);
-        [rgb(0x1C1C1E) setFill];
+        [COLOR_TICK setFill];
         UIRectFill(CGRectMake(x - 1, 0, 2, track.size.height));
     }
 }
@@ -59,7 +76,7 @@ static BOOL daemonRunning(void) {
 @end
 
 enum { SecLimit, SecBattery, SecCount };
-enum { RowEnabled, RowLimit, RowSlider, RowResume, LimitRows };
+enum { RowEnabled, RowLimit, RowSlider, RowResume, RowResumeOff, LimitRows };
 enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
 
 @interface SettingsController : UITableViewController
@@ -75,21 +92,51 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
     LevelBar *_bar;
     UISwitch *_switch;
     UISlider *_slider;
-    UIStepper *_stepper;
+    UIStepper *_stepper, *_stepperOff;
     NSArray *_limitCells, *_batteryCells;
     NSTimer *_timer;
 }
 
 - (instancetype)init {
-    if ((self = [super initWithStyle:UITableViewStyleGrouped])) self.title = @"ChargeCap";
+#if MODERN
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+#else
+    self = [super initWithStyle:UITableViewStyleGrouped];
+#endif
+    if (self) self.title = @"ChargeCap";
     return self;
 }
 
 - (UITableViewCell *)cell:(NSString *)title {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
+#if MODERN
+    UIListContentConfiguration *config = UIListContentConfiguration.valueCellConfiguration;
+    config.text = title;
+    c.contentConfiguration = config;
+#else
     c.textLabel.text = title;
+#endif
     c.selectionStyle = UITableViewCellSelectionStyleNone;
     return c;
+}
+
+- (void)setDetail:(NSString *)detail ofCell:(UITableViewCell *)c {
+#if MODERN
+    UIListContentConfiguration *config = (UIListContentConfiguration *)c.contentConfiguration;
+    config.secondaryText = detail;
+    c.contentConfiguration = config;
+#else
+    c.detailTextLabel.text = detail;
+    [c setNeedsLayout];
+#endif
+}
+
+// Sits beside the value label, with a gap so the label stays off the stepper.
+- (UIView *)stepperAccessory:(UIStepper *)stepper {
+    UIView *gap = [[UIView alloc] initWithFrame:CGRectMake(0, 0, stepper.bounds.size.width + 14, stepper.bounds.size.height)];
+    stepper.frame = CGRectOffset(stepper.bounds, 14, 0);
+    [gap addSubview:stepper];
+    return gap;
 }
 
 - (void)viewDidLoad {
@@ -107,6 +154,9 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
     _stepper = [UIStepper new];
     _stepper.minimumValue = CC_MIN_RESUME;
     [_stepper addTarget:self action:@selector(stepped) forControlEvents:UIControlEventValueChanged];
+    _stepperOff = [UIStepper new];
+    _stepperOff.minimumValue = CC_MIN_RESUME;
+    [_stepperOff addTarget:self action:@selector(steppedOff) forControlEvents:UIControlEventValueChanged];
 
     UITableViewCell *enabled = [self cell:@"Limit charging"];
     enabled.accessoryView = _switch;
@@ -115,29 +165,36 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
     slider.slider = _slider;
     [slider.contentView addSubview:_slider];
     UITableViewCell *resume = [self cell:@"Charge again at"];
-    UIView *gap = [[UIView alloc] initWithFrame:CGRectMake(0, 0, _stepper.bounds.size.width + 14, _stepper.bounds.size.height)];
-    _stepper.frame = CGRectOffset(_stepper.bounds, 14, 0);
-    [gap addSubview:_stepper];
-    resume.accessoryView = gap; // keeps the value label off the stepper
-    _limitCells = @[ enabled, [self cell:@"Pause charging at"], slider, resume ];
+    resume.accessoryView = [self stepperAccessory:_stepper];
+    UITableViewCell *resumeOff = [self cell:@"With the screen off, at"];
+    resumeOff.accessoryView = [self stepperAccessory:_stepperOff];
+    _limitCells = @[ enabled, [self cell:@"Pause charging at"], slider, resume, resumeOff ];
     _batteryCells = @[ [self cell:@"Health"], [self cell:@"Charge cycles"], [self cell:@"Temperature"],
                        [self cell:@"Current"] ];
 
     UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 168)];
-    _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 18, 320, 84)];
+    _percentLabel = [UILabel new];
+    _stateLabel = [UILabel new];
+#if MODERN
+    UIFont *big = [UIFont monospacedDigitSystemFontOfSize:64 weight:UIFontWeightSemibold];
+    big = [UIFont fontWithDescriptor:[big.fontDescriptor fontDescriptorWithDesign:UIFontDescriptorSystemDesignRounded] size:64];
+    _percentLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleLargeTitle] scaledFontForFont:big maximumPointSize:96];
+    _stateLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    _percentLabel.adjustsFontForContentSizeCategory = YES;
+    _stateLabel.adjustsFontForContentSizeCategory = YES;
+    _stateLabel.numberOfLines = 0;
+#else
     _percentLabel.font = [UIFont systemFontOfSize:76 weight:UIFontWeightUltraLight];
-    _stateLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 102, 320, 22)];
     _stateLabel.font = [UIFont systemFontOfSize:17];
-    _stateLabel.textColor = rgb(0x6D6D72);
+#endif
+    _stateLabel.textColor = COLOR_SECONDARY;
     for (UILabel *l in @[ _percentLabel, _stateLabel ]) {
         l.textAlignment = NSTextAlignmentCenter;
-        l.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         [header addSubview:l];
     }
-    _bar = [[LevelBar alloc] initWithFrame:CGRectMake(40, 140, 240, 8)];
+    _bar = [LevelBar new];
     _bar.backgroundColor = UIColor.clearColor;
     _bar.contentMode = UIViewContentModeRedraw;
-    _bar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [header addSubview:_bar];
     self.tableView.tableHeaderView = header;
 
@@ -146,11 +203,27 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
     [self reloadPrefs];
 }
 
-// Line the level bar up with the text in the cells below it.
+// Stack the header to fit its text, which grows with the reader's text size, and line the
+// level bar up with the content below it.
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    UIView *header = self.tableView.tableHeaderView;
+    CGFloat width = self.tableView.bounds.size.width;
+    CGFloat percentHeight = [_percentLabel sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)].height;
+    CGFloat stateHeight = [_stateLabel sizeThatFits:CGSizeMake(width - 40, CGFLOAT_MAX)].height;
+    _percentLabel.frame = CGRectMake(0, 14, width, percentHeight);
+    _stateLabel.frame = CGRectMake(20, CGRectGetMaxY(_percentLabel.frame), width - 40, stateHeight);
+#if MODERN
+    CGRect text = self.tableView.layoutMarginsGuide.layoutFrame;
+#else
     CGRect text = self.tableView.readableContentGuide.layoutFrame;
-    _bar.frame = CGRectMake(CGRectGetMinX(text), 140, CGRectGetWidth(text), 8);
+#endif
+    _bar.frame = CGRectMake(CGRectGetMinX(text), CGRectGetMaxY(_stateLabel.frame) + 14, CGRectGetWidth(text), 8);
+    CGFloat height = CGRectGetMaxY(_bar.frame) + 18;
+    if (header.frame.size.width != width || header.frame.size.height != height) {
+        header.frame = CGRectMake(0, 0, width, height);
+        self.tableView.tableHeaderView = header; // the table only rereads the height when it is set again
+    }
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -177,9 +250,11 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
 - (void)showPrefs {
     _stepper.maximumValue = _prefs.limit - 1;
     _stepper.value = _prefs.resume;
-    [_limitCells[RowLimit] detailTextLabel].text = [NSString stringWithFormat:@"%d%%", _prefs.limit];
-    [_limitCells[RowResume] detailTextLabel].text = [NSString stringWithFormat:@"%d%%", _prefs.resume];
-    for (NSUInteger i = RowLimit; i < LimitRows; i++) [_limitCells[i] setNeedsLayout];
+    _stepperOff.maximumValue = _prefs.resume;
+    _stepperOff.value = _prefs.resume_off;
+    [self setDetail:[NSString stringWithFormat:@"%d%%", _prefs.limit] ofCell:_limitCells[RowLimit]];
+    [self setDetail:[NSString stringWithFormat:@"%d%%", _prefs.resume] ofCell:_limitCells[RowResume]];
+    [self setDetail:[NSString stringWithFormat:@"%d%%", _prefs.resume_off] ofCell:_limitCells[RowResumeOff]];
     UITableViewHeaderFooterView *footer = [self.tableView footerViewForSection:SecLimit];
     footer.textLabel.text = [self tableView:self.tableView titleForFooterInSection:SecLimit];
     [footer setNeedsLayout];
@@ -225,6 +300,11 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
     [self save];
 }
 
+- (void)steppedOff {
+    _prefs.resume_off = (int)_stepperOff.value;
+    [self save];
+}
+
 - (void)refresh {
     if (!cc_battery_read(&_battery)) {
         _percentLabel.text = @"–";
@@ -233,6 +313,7 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
     }
     _percentLabel.text = [NSString stringWithFormat:@"%d%%", _battery.percent];
     if (!_battery.external) _stateLabel.text = @"On battery";
+    else if (_battery.draining) _stateLabel.text = [NSString stringWithFormat:@"Plugged in · running down to %d%%", _prefs.limit];
     else if (_battery.inhibited) _stateLabel.text = @"Plugged in · charging paused";
     else if (_battery.charging && _prefs.enabled && _battery.percent < _prefs.limit)
         _stateLabel.text = [NSString stringWithFormat:@"Charging to %d%%", _prefs.limit];
@@ -248,10 +329,8 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
     NSArray *values = @[ health, [NSString stringWithFormat:@"%d", _battery.cycles],
                          [NSString stringWithFormat:@"%.1f °C", _battery.temp_c100 / 100.0],
                          [NSString stringWithFormat:@"%+d mA", _battery.milliamps] ];
-    for (NSUInteger i = 0; i < BatteryRows; i++) {
-        [_batteryCells[i] detailTextLabel].text = values[i];
-        [_batteryCells[i] setNeedsLayout];
-    }
+    for (NSUInteger i = 0; i < BatteryRows; i++) [self setDetail:values[i] ofCell:_batteryCells[i]];
+    [self.view setNeedsLayout];
 
     BOOL up = daemonRunning();
     if (up != _daemonUp) {
@@ -280,9 +359,12 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
     if (section == SecLimit) {
         if (!_prefs.enabled) return @"The iPad charges to 100% as normal.";
-        return [NSString stringWithFormat:@"Charging pauses at %d%% and starts again once the battery falls to %d%%. "
-                                          @"While paused, the iPad runs from the charger.",
-                                          _prefs.limit, _prefs.resume];
+        return [NSString stringWithFormat:@"Charging pauses at %1$d%% and starts again once the battery falls to %2$d%%, "
+                                          @"or %3$d%% while the screen is off. While paused, the iPad runs from the charger."
+#if MODERN
+                                          @" Above %1$d%%, it runs from the battery until it is back at %1$d%%."
+#endif
+                                          , _prefs.limit, _prefs.resume, _prefs.resume_off];
     }
     if (!_daemonUp) return @"The ChargeCap service isn't running, so the limit isn't being applied. Reinstall the package to start it.";
     return nil;
@@ -296,17 +378,30 @@ enum { RowHealth, RowCycles, RowTemp, RowCurrent, BatteryRows };
 @implementation AppDelegate
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:[SettingsController new]];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[SettingsController new]];
+#if MODERN
+    nav.navigationBar.prefersLargeTitles = YES;
+#endif
+    self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
     return YES;
 }
 
 // chargecap://snapshot saves a picture of the screen, for checking the layout over SSH.
-- (BOOL)application:(UIApplication *)app openURL:(NSURL *)url sourceApplication:(NSString *)source annotation:(id)annotation {
+// chargecap://snapshot/dark and /light force that appearance first.
+- (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary *)options {
     if (![url.host isEqualToString:@"snapshot"]) return NO;
+#if MODERN
+    if ([url.path isEqualToString:@"/dark"]) self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    if ([url.path isEqualToString:@"/light"]) self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
+#endif
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIGraphicsBeginImageContextWithOptions(self.window.bounds.size, YES, 0);
+#if MODERN
+        [self.window.layer renderInContext:UIGraphicsGetCurrentContext()]; // drawViewHierarchy comes out black here
+#else
         [self.window drawViewHierarchyInRect:self.window.bounds afterScreenUpdates:YES];
+#endif
         UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
         UIGraphicsEndImageContext();
         [UIImagePNGRepresentation(image) writeToFile:@"/var/mobile/Media/ChargeCap-snapshot.png" atomically:YES];

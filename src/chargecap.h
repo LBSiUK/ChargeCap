@@ -21,13 +21,16 @@ typedef struct {
     bool enabled;
     int limit;  // pause charging once the battery reaches this percent
     int resume; // charge again once it falls to this percent
+    int resume_off; // the same, while the screen is off
 } cc_prefs;
 
 typedef struct {
     int percent;     // as the status bar shows it
+    int raw_percent; // from the gauge's mAh; the status bar's figure can sit at 100 well into a discharge
     bool external;   // plugged into power
     bool charging;   // charger is putting current into the battery
     bool inhibited;  // some process holds a ChargeInhibit assertion
+    bool draining;   // some process holds a DisableInflow assertion: running from the battery on purpose
     int milliamps;   // battery current, + charging, - discharging
     int cycles;
     int max_mah;     // what the battery holds today

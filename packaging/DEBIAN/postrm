@@ -1,6 +1,10 @@
 #!/bin/sh
+PATH=@PREFIX@/usr/bin:@PREFIX@/bin:$PATH
 if [ "$1" = remove ] || [ "$1" = purge ]; then
-    su mobile -c uicache 2>/dev/null || uicache 2>/dev/null
+    case "$(dpkg-query -W -f='${Version}' uikittools 2>/dev/null)" in
+        1.*) su mobile -c uicache 2>/dev/null || uicache 2>/dev/null ;;
+        *) uicache -u @PREFIX@/Applications/ChargeCap.app ;;
+    esac
 fi
 if [ "$1" = purge ]; then
     rm -f /var/mobile/Library/Preferences/uk.lbsi.chargecap.plist /var/mobile/Library/Logs/ChargeCap.log*

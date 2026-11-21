@@ -1,5 +1,6 @@
 // chargecap: show or change the charge limit from a shell.
 #include "chargecap.h"
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@ static int usage(void) {
             "usage: chargecap                 show battery and limit\n"
             "       chargecap limit <%d-100>  pause charging at this percent\n"
             "       chargecap resume <n>      charge again once the battery falls to n percent\n"
+            "       chargecap screenoff <n>   the same, while the screen is off\n"
             "       chargecap on | off        turn the limit on or off\n"
             "       chargecap log             recent daemon log\n",
             CC_MIN_LIMIT);
@@ -24,7 +26,8 @@ static bool daemon_running(void) {
         if (fscanf(f, "%d", &pid) != 1) pid = 0;
         fclose(f);
     }
-    return pid > 0 && kill(pid, 0) == 0;
+    // The daemon runs as root, so from mobile a live pid answers EPERM.
+    return pid > 0 && (kill(pid, 0) == 0 || errno == EPERM);
 }
 
 static int status(void) {
@@ -36,12 +39,13 @@ static int status(void) {
         return 1;
     }
     const char *state = !b.external ? "on battery"
+                        : b.draining ? "plugged in, running down to the limit"
                         : b.inhibited ? "plugged in, charging paused"
                         : b.charging ? "charging"
                                      : "plugged in, not charging";
     printf("Battery  %d%%, %s (%+d mA)\n", b.percent, state, b.milliamps);
     if (p.enabled)
-        printf("Limit    pause at %d%%, resume at %d%%\n", p.limit, p.resume);
+        printf("Limit    pause at %d%%, resume at %d%% (%d%% with the screen off)\n", p.limit, p.resume, p.resume_off);
     else
         printf("Limit    off\n");
     if (b.design_mah > 0)
@@ -99,6 +103,11 @@ int main(int argc, char **argv) {
     } else if (argc == 3 && !strcmp(argv[1], "resume") && parse_percent(argv[2], &p.resume)) {
         if (p.resume >= p.limit) {
             fprintf(stderr, "chargecap: resume must be below the limit (%d%%)\n", p.limit);
+            return 1;
+        }
+    } else if (argc == 3 && !strcmp(argv[1], "screenoff") && parse_percent(argv[2], &p.resume_off)) {
+        if (p.resume_off > p.resume) {
+            fprintf(stderr, "chargecap: screenoff can't be above resume (%d%%)\n", p.resume);
             return 1;
         }
     } else

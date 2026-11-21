@@ -25,17 +25,15 @@
 		<string>iPhoneOS</string>
 	</array>
 	<key>MinimumOSVersion</key>
-	<string>9.0</string>
+	<string>@FIRMWARE@</string>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>2</integer>
 	</array>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>@CPU@</string>
 	</array>
-	<key>UIRequiresFullScreen</key>
-	<true/>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -55,6 +53,8 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UILaunchImages~ipad</key>
 	<array>
 		<dict>
